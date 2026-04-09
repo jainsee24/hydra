@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+workspace/
+.shared_memory/
+*.env
+.env.*
+node_modules/
+.vscode/
+.idea/
+*.log

@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent Security Reviewer</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #131920;
+    --surface2: #1a2028;
+    --border: #252d38;
+    --text: #e0e6ed;
+    --text-dim: #6b7a8d;
+    --accent: #4da6ff;
+    --green: #2dd4a0;
+    --yellow: #f0c040;
+    --red: #f55050;
+    --orange: #f09030;
+    --purple: #a87bf5;
+    --cyan: #4cc9f0;
+    --pink: #f472b6;
+    --radius: 10px;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6; min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--border); padding: 12px 24px;
+    display: flex; align-items: center; gap: 12px; height: 52px;
+  }
+  header h1 {
+    font-size: 16px; font-weight: 700;
+    background: linear-gradient(135deg, var(--red), var(--orange), var(--yellow));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  header .badge {
+    font-size: 10px; padding: 2px 8px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  header .status-badge {
+    margin-left: auto; font-size: 11px; padding: 4px 12px;
+    border-radius: 12px; font-weight: 600;
+  }
+  .status-badge.idle { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); }
+  .status-badge.running { background: rgba(45,212,160,0.1); border: 1px solid var(--green); color: var(--green); animation: pulse 2s infinite; }
+  .status-badge.completed { background: rgba(45,212,160,0.1); border: 1px solid var(--green); color: var(--green); }
+  .status-badge.failed { background: rgba(245,80,80,0.1); border: 1px solid var(--red); color: var(--red); }
+  .status-badge.stopped { background: rgba(240,192,64,0.1); border: 1px solid var(--yellow); color: var(--yellow); }
+
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  /* Layout */
+  .container {
+    display: grid; grid-template-columns: 340px 1fr 360px; gap: 0;
+    height: calc(100vh - 52px);
+  }
+  @media (max-width: 1200px) {
+    .container { grid-template-columns: 300px 1fr; }
+    .right-panel { display: none; }
+  }
+
+  .left-panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+  .center-panel { display: flex; flex-direction: column; overflow: hidden; }
+  .right-panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+
+  .panel-section {
+    padding: 16px; border-bottom: 1px solid var(--border);
+  }
+  .panel-header {
+    font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Form */
+  label { display: block; font-size: 11px; font-weight: 500; color: var(--text-dim); margin-bottom: 3px; }
+  input[type="text"], select, textarea {
+    width: 100%; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 12px; font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  .form-group { margin-bottom: 10px; }
+  .form-row { display: flex; gap: 8px; }
+  .form-row > * { flex: 1; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 16px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: none; transition: all 0.15s; width: 100%;
+  }
+  .btn-primary { background: var(--red); color: #fff; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-stop { background: transparent; color: var(--yellow); border: 1px solid var(--yellow); margin-top: 6px; }
+  .btn-stop:hover { background: var(--yellow); color: #000; }
+
+  /* Severity badges */
+  .sev { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; text-transform: uppercase; }
+  .sev-critical { background: rgba(245,80,80,0.15); color: var(--red); }
+  .sev-high { background: rgba(240,144,48,0.15); color: var(--orange); }
+  .sev-medium { background: rgba(240,192,64,0.15); color: var(--yellow); }
+  .sev-low { background: rgba(45,212,160,0.15); color: var(--green); }
+  .sev-info { background: rgba(77,166,255,0.15); color: var(--accent); }
+
+  /* Finding cards */
+  .finding-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 8px; overflow: hidden; transition: all 0.2s;
+  }
+  .finding-card:hover { border-color: var(--text-dim); }
+  .finding-card.critical { border-left: 3px solid var(--red); }
+  .finding-card.high { border-left: 3px solid var(--orange); }
+  .finding-card.medium { border-left: 3px solid var(--yellow); }
+  .finding-card.low { border-left: 3px solid var(--green); }
+  .finding-card.info { border-left: 3px solid var(--accent); }
+  .finding-header {
+    padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  }
+  .finding-header:hover { background: var(--surface2); }
+  .finding-chevron { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; width: 12px; }
+  .finding-card.expanded .finding-chevron { transform: rotate(90deg); }
+  .finding-title-text { flex: 1; font-size: 12px; font-weight: 600; }
+  .finding-cvss { font-family: var(--font-mono); font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--bg); }
+  .finding-body {
+    display: none; padding: 0 14px 14px; font-size: 11px; line-height: 1.7;
+    border-top: 1px solid var(--border);
+  }
+  .finding-card.expanded .finding-body { display: block; }
+  .finding-section { margin-top: 10px; }
+  .finding-section-title { font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .finding-code {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 10px; font-family: var(--font-mono); font-size: 10px;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--cyan);
+    max-height: 200px; overflow-y: auto;
+  }
+  .finding-tag { display: inline-block; font-size: 9px; padding: 1px 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); margin-right: 4px; margin-top: 4px; }
+  .finding-remediation {
+    background: rgba(45,212,160,0.05); border: 1px solid rgba(45,212,160,0.2);
+    border-radius: 4px; padding: 8px 10px; font-size: 11px; color: var(--green);
+  }
+  .finding-badge-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .finding-new { animation: findingPulse 1s ease-out; }
+  @keyframes findingPulse { 0% { background: rgba(245,80,80,0.15); } 100% { background: transparent; } }
+
+  /* Stats grid */
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  }
+  .stat-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px; text-align: center;
+  }
+  .stat-value { font-size: 22px; font-weight: 800; font-family: var(--font-mono); }
+  .stat-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Phase list */
+  .phase-list { list-style: none; }
+  .phase-item {
+    padding: 6px 10px; border-radius: 6px; margin-bottom: 3px;
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    background: var(--bg); border: 1px solid transparent; transition: all 0.2s;
+  }
+  .phase-item.active { border-color: var(--accent); background: rgba(77,166,255,0.05); }
+  .phase-item.completed { opacity: 0.6; }
+  .phase-item.completed .phase-icon { color: var(--green); }
+  .phase-icon { width: 14px; text-align: center; font-size: 10px; color: var(--text-dim); }
+  .phase-name { flex: 1; font-size: 11px; }
+
+  /* Graph canvas */
+  #graphCanvas {
+    flex: 1; overflow: hidden; position: relative;
+  }
+  #graphCanvas svg { width: 100%; height: 100%; }
+  .graph-legend {
+    position: absolute; bottom: 12px; left: 12px; display: flex; gap: 12px;
+    font-size: 10px; color: var(--text-dim); background: rgba(10,14,20,0.85);
+    padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);
+  }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+
+  /* Log stream */
+  .log-stream {
+    font-size: 10px; font-family: var(--font-mono); line-height: 1.7;
+    overflow-y: auto; flex: 1; padding: 8px 16px;
+  }
+  .log-entry { padding: 1px 0; border-bottom: 1px solid rgba(37,45,56,0.3); }
+  .log-entry .time { color: var(--text-dim); font-size: 9px; margin-right: 4px; }
+  .log-entry .agent-tag {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    margin-right: 4px; font-weight: 600;
+  }
+  .tag-recon { background: rgba(77,166,255,0.15); color: var(--accent); }
+  .tag-injection { background: rgba(245,80,80,0.15); color: var(--red); }
+  .tag-auth { background: rgba(240,192,64,0.15); color: var(--yellow); }
+  .tag-infrastructure { background: rgba(168,123,245,0.15); color: var(--purple); }
+  .tag-supply { background: rgba(76,201,240,0.15); color: var(--cyan); }
+  .tag-advanced { background: rgba(244,114,182,0.15); color: var(--pink); }
+  .tag-coordination { background: rgba(45,212,160,0.15); color: var(--green); }
+  .log-entry.phase { color: var(--green); font-weight: 600; }
+  .log-entry.error { color: var(--red); }
+
+  /* Findings list */
+  .finding-item {
+    padding: 8px 10px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 4px; font-size: 11px;
+  }
+  .finding-title { font-weight: 600; margin-bottom: 2px; }
+  .finding-meta { color: var(--text-dim); font-size: 10px; }
+
+  /* Download section */
+  .download-btn {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); text-decoration: none; font-size: 12px; margin-bottom: 6px;
+    transition: all 0.15s;
+  }
+  .download-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* User Question Modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 1000; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--accent); border-radius: 12px;
+    padding: 24px; max-width: 520px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    animation: modalIn 0.2s ease-out;
+  }
+  @keyframes modalIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .modal-title {
+    font-size: 14px; font-weight: 700; color: var(--accent); margin-bottom: 4px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .modal-timer {
+    font-size: 11px; color: var(--yellow); font-family: var(--font-mono);
+    margin-left: auto; font-weight: 600;
+  }
+  .modal-question {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px; margin: 12px 0; font-size: 12px; line-height: 1.7;
+    max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+  }
+  .modal-input {
+    width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-size: 12px; font-family: inherit;
+    margin-bottom: 12px; resize: vertical; min-height: 60px;
+  }
+  .modal-input:focus { outline: none; border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; }
+  .modal-actions .btn { flex: 1; }
+  .btn-secondary { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--text-dim); color: var(--text); }
+  .btn-accent { background: var(--accent); color: #000; }
+  .btn-accent:hover { filter: brightness(1.15); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Tabs */
+  .tab-bar { display: flex; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 8px 16px; font-size: 11px; font-weight: 600; color: var(--text-dim);
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+  .tab-content.active { display: flex; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Multi-Agent Security Reviewer</h1>
+  <span class="badge">Authorized Testing</span>
+  <span class="badge" id="agentCountBadge">0 agents</span>
+  <span class="badge" id="findingCountBadge">0 findings</span>
+  <span id="statusBadge" class="status-badge idle">Idle</span>
+</header>
+
+<div class="container">
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="panel-section">
+      <div class="panel-header">Attack Brief</div>
+      <div class="form-group">
+        <label>Describe the target, what to attack, and any context</label>
+        <textarea id="attackBrief" rows="8" style="min-height:140px;font-size:12px;line-height:1.6;resize:vertical" placeholder="Example:
+Target: https://example.com
+It's a Node.js + Angular SPA with a REST API at /api/v1.
+Auth is JWT-based with OTP login via SMS.
+Payment integration uses PayU (merchant key might be in JS bundle).
+Admin panel at /admin uses separate session cookies.
+Pusher is used for real-time notifications.
+Dev/staging environments at dev.example.com and qa.example.com.
+Focus on: auth bypass, OTP brute force, payment fraud, exposed secrets.
+The blog runs WordPress on a separate server at blog.example.com."></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="selDuration">
+            <option value="15min">15 minutes</option>
+            <option value="30min">30 minutes</option>
+            <option value="1hr" selected>1 hour</option>
+            <option value="2hr">2 hours</option>
+            <option value="4hr">4 hours</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Model</label>
+          <select id="selModel">
+            <option value="opus">Opus</option>
+            <option value="sonnet">Sonnet</option>
+            <option value="haiku">Haiku</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Aggressiveness</label>
+          <select id="selAggr">
+            <option value="passive">Passive</option>
+            <option value="active" selected>Active</option>
+            <option value="aggressive">Aggressive</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Max Agents</label>
+          <input type="text" id="txtMaxAgents" value="50">
+        </div>
+      </div>
+      <button id="btnStart" class="btn btn-primary" onclick="startScan()">Launch Attack</button>
+      <button id="btnStop" class="btn btn-stop" onclick="stopScan()" style="display:none">Stop Scan</button>
+    </div>
+
+    <div class="panel-section">
+      <div class="panel-header">Findings Summary</div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="statCritical" style="color:var(--red)">0</div><div class="stat-label">Critical</div></div>
+        <div class="stat-card"><div class="stat-value" id="statHigh" style="color:var(--orange)">0</div><div class="stat-label">High</div></div>
+        <div class="stat-card"><div class="stat-value" id="statMedium" style="color:var(--yellow)">0</div><div class="stat-label">Medium</div></div>
+      </div>
+      <div class="stats-grid" style="margin-top:6px">
+        <div class="stat-card"><div class="stat-value" id="statLow" style="color:var(--green)">0</div><div class="stat-label">Low</div></div>
+        <div class="stat-card"><div class="stat-value" id="statAgents" style="color:var(--accent)">0</div><div class="stat-label">Agents</div></div>
+        <div class="stat-card"><div class="stat-value" id="statEndpoints" style="color:var(--cyan)">0</div><div class="stat-label">Endpoints</div></div>
+      </div>
+    </div>
+
+    <div class="panel-section" style="flex:1; overflow-y:auto">
+      <div class="panel-header">Pipeline Phases</div>
+      <ul class="phase-list" id="phaseList"></ul>
+      <div id="downloadSection" style="display:none; margin-top:12px">
+        <a class="download-btn" id="downloadReport" href="#" target="_blank">Download Report (Markdown)</a>
+      </div>
+      <div id="timerSection" style="margin-top:12px; text-align:center; display:none">
+        <div style="font-size:9px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px">Elapsed</div>
+        <div id="elapsedTimer" style="font-size:28px; font-weight:800; font-family:var(--font-mono); color:var(--accent)">00:00</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER PANEL -->
+  <div class="center-panel">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('graph')">Agent Graph</div>
+      <div class="tab" onclick="switchTab('log')">Activity Log</div>
+      <div class="tab" onclick="switchTab('findings')">Findings</div>
+    </div>
+
+    <div id="tabGraph" class="tab-content active">
+      <div id="graphCanvas">
+        <svg id="graphSvg"></svg>
+        <div class="graph-legend">
+          <span><span class="legend-dot" style="background:var(--accent)"></span>Recon</span>
+          <span><span class="legend-dot" style="background:var(--red)"></span>Injection</span>
+          <span><span class="legend-dot" style="background:var(--yellow)"></span>Auth</span>
+          <span><span class="legend-dot" style="background:var(--purple)"></span>Infra</span>
+          <span><span class="legend-dot" style="background:var(--cyan)"></span>Supply</span>
+          <span><span class="legend-dot" style="background:var(--pink)"></span>Advanced</span>
+          <span><span class="legend-dot" style="background:var(--green)"></span>Coordination</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="tabLog" class="tab-content">
+      <div class="log-stream" id="logStream"></div>
+    </div>
+
+    <div id="tabFindings" class="tab-content" style="overflow-y:auto; padding:12px">
+      <div id="findingsFilter" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+        <button class="sev sev-critical" onclick="filterFindings('critical')" style="cursor:pointer;border:none">Critical <span id="filterCritCount">0</span></button>
+        <button class="sev sev-high" onclick="filterFindings('high')" style="cursor:pointer;border:none">High <span id="filterHighCount">0</span></button>
+        <button class="sev sev-medium" onclick="filterFindings('medium')" style="cursor:pointer;border:none">Medium <span id="filterMedCount">0</span></button>
+        <button class="sev sev-low" onclick="filterFindings('low')" style="cursor:pointer;border:none">Low <span id="filterLowCount">0</span></button>
+        <button class="sev sev-info" onclick="filterFindings('info')" style="cursor:pointer;border:none">Info <span id="filterInfoCount">0</span></button>
+        <button class="sev" onclick="filterFindings('all')" style="cursor:pointer;border:none;background:var(--surface2);color:var(--text)">All</button>
+      </div>
+      <div id="findingsList"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="panel-section" style="flex:1; overflow-y:auto">
+      <div class="panel-header">Agent Activity</div>
+      <div id="agentList" style="font-size:11px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- User Question Modal -->
+<div class="modal-overlay" id="questionModal">
+  <div class="modal">
+    <div class="modal-title">
+      Agent Needs Your Input
+      <span class="modal-timer" id="modalTimer">30s</span>
+    </div>
+    <div class="modal-question" id="modalQuestion"></div>
+    <textarea class="modal-input" id="modalAnswer" placeholder="Type your answer here (credentials, OTP code, scope info, etc.)..."></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="dismissQuestion()">Skip</button>
+      <button class="btn btn-accent" onclick="submitAnswer()">Send Answer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let currentJobId = null;
+let eventSource = null;
+let logCount = 0;
+let agentCount = 0;
+let startTime = null;
+let timerInterval = null;
+const phases = new Set();
+const agents = new Map(); // id -> {name, type, status, findings}
+const findings = [];
+
+// ═══════════════════════════════════════════════════════════
+// GRAPH STATE
+// ═══════════════════════════════════════════════════════════
+const graphNodes = [];
+const graphLinks = [];
+let simulation = null;
+let svgGroup = null;
+
+const typeColors = {
+  master: '#ffffff',
+  recon: '#4da6ff',
+  injection: '#f55050',
+  auth: '#f0c040',
+  infrastructure: '#a87bf5',
+  supply: '#4cc9f0',
+  advanced: '#f472b6',
+  coordination: '#2dd4a0',
+  other: '#6b7a8d',
+};
+
+function initGraph() {
+  const svg = d3.select('#graphSvg');
+  const container = document.getElementById('graphCanvas');
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+  svgGroup = svg.append('g');
+
+  // Add master node at center
+  graphNodes.push({ id: 'master', name: 'Master', type: 'master', status: 'running', x: w/2, y: h/2, fx: w/2, fy: h/2 });
+
+  simulation = d3.forceSimulation(graphNodes)
+    .force('link', d3.forceLink(graphLinks).id(d => d.id).distance(100))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(w/2, h/2))
+    .force('collision', d3.forceCollide().radius(25))
+    .on('tick', renderGraph);
+
+  // Zoom
+  const zoom = d3.zoom().scaleExtent([0.3, 3]).on('zoom', e => svgGroup.attr('transform', e.transform));
+  svg.call(zoom);
+}
+
+function renderGraph() {
+  // Links
+  const links = svgGroup.selectAll('.link').data(graphLinks, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
+  links.enter().append('line').attr('class', 'link')
+    .attr('stroke', '#252d38').attr('stroke-width', 1).attr('stroke-opacity', 0.5);
+  links.exit().remove();
+  svgGroup.selectAll('.link')
+    .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+
+  // Nodes
+  const nodes = svgGroup.selectAll('.node').data(graphNodes, d => d.id);
+  const enter = nodes.enter().append('g').attr('class', 'node');
+  enter.append('circle').attr('r', d => d.id === 'master' ? 16 : 10)
+    .attr('fill', d => typeColors[d.type] || typeColors.other)
+    .attr('fill-opacity', 0.7)
+    .attr('stroke', d => typeColors[d.type] || typeColors.other)
+    .attr('stroke-width', 1.5)
+    .attr('stroke-opacity', 0.9);
+  enter.append('text')
+    .attr('dy', d => d.id === 'master' ? 28 : 22)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#6b7a8d').attr('font-size', '8px').attr('font-weight', '600')
+    .text(d => d.name.length > 18 ? d.name.slice(0,16)+'..' : d.name);
+
+  // Pulse running nodes
+  svgGroup.selectAll('.node circle')
+    .attr('fill-opacity', d => d.status === 'running' ? 0.9 : 0.4)
+    .attr('stroke-opacity', d => d.status === 'running' ? 1 : 0.3)
+    .attr('r', d => {
+      if (d.id === 'master') return 16;
+      return d.status === 'running' ? 11 : 8;
+    });
+
+  nodes.exit().remove();
+  svgGroup.selectAll('.node').attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+function addAgentNode(agentId, name, type) {
+  const container = document.getElementById('graphCanvas');
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  const angle = Math.random() * Math.PI * 2;
+  const dist = 120 + Math.random() * 80;
+
+  graphNodes.push({
+    id: agentId,
+    name: name.length > 25 ? name.slice(0,23)+'..' : name,
+    type: type || 'other',
+    status: 'running',
+    x: w/2 + Math.cos(angle) * dist,
+    y: h/2 + Math.sin(angle) * dist,
+  });
+  graphLinks.push({ source: 'master', target: agentId });
+
+  simulation.nodes(graphNodes);
+  simulation.force('link').links(graphLinks);
+  simulation.alpha(0.3).restart();
+}
+
+function updateAgentNode(agentId, status) {
+  const node = graphNodes.find(n => n.id === agentId);
+  if (node) {
+    node.status = status;
+    renderGraph();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab-content#tab${tab.charAt(0).toUpperCase()+tab.slice(1)}`).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════
+// SCAN CONTROL
+// ═══════════════════════════════════════════════════════════
+async function startScan() {
+  const brief = document.getElementById('attackBrief').value.trim();
+  if (!brief) { alert('Describe the target and what to attack'); return; }
+
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').style.display = 'block';
+  setStatus('running');
+  resetUI();
+
+  const body = {
+    attack_brief: brief,
+    duration: document.getElementById('selDuration').value,
+    model: document.getElementById('selModel').value,
+    aggressiveness: document.getElementById('selAggr').value,
+    max_agents: parseInt(document.getElementById('txtMaxAgents').value) || 50,
+  };
+
+  try {
+    const resp = await fetch('/api/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (data.error) { alert(data.error); resetButtons(); return; }
+    currentJobId = data.job_id;
+    startTime = Date.now();
+    document.getElementById('timerSection').style.display = 'block';
+    timerInterval = setInterval(updateTimer, 1000);
+    startFindingsPolling();
+    connectSSE(data.job_id);
+  } catch (e) {
+    alert('Failed to start: ' + e.message);
+    resetButtons();
+  }
+}
+
+async function stopScan() {
+  if (!currentJobId) return;
+  try { await fetch(`/api/stop/${currentJobId}`, {method: 'POST'}); } catch(e) {}
+  setStatus('stopped');
+  resetButtons();
+}
+
+function resetButtons() {
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').style.display = 'none';
+  if (timerInterval) clearInterval(timerInterval);
+  stopFindingsPolling();
+}
+
+function resetUI() {
+  document.getElementById('logStream').innerHTML = '';
+  document.getElementById('phaseList').innerHTML = '';
+  document.getElementById('findingsList').innerHTML = '';
+  document.getElementById('agentList').innerHTML = '';
+  document.getElementById('downloadSection').style.display = 'none';
+  ['statCritical','statHigh','statMedium','statLow','statAgents','statEndpoints'].forEach(id => {
+    document.getElementById(id).textContent = '0';
+  });
+  logCount = 0; agentCount = 0; phases.clear(); lastFindingsCount = 0; currentFilter = 'all';
+  agents.clear(); findings.length = 0;
+  graphNodes.length = 0; graphLinks.length = 0;
+  document.getElementById('agentCountBadge').textContent = '0 agents';
+  document.getElementById('findingCountBadge').textContent = '0 findings';
+  initGraph();
+}
+
+function updateTimer() {
+  if (!startTime) return;
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+  const s = (elapsed % 60).toString().padStart(2, '0');
+  document.getElementById('elapsedTimer').textContent = `${m}:${s}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// SSE
+// ═══════════════════════════════════════════════════════════
+function connectSSE(jobId) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/events/${jobId}`);
+  eventSource.onmessage = (e) => {
+    try { handleEvent(JSON.parse(e.data)); } catch(err) { console.error(err); }
+  };
+  eventSource.onerror = () => { eventSource.close(); eventSource = null; };
+}
+
+function handleEvent(event) {
+  const type = event.type;
+  if (type === 'heartbeat') return;
+  addLog(event);
+
+  if (type === 'phase_start') {
+    addPhase(event.phase, 'active');
+  } else if (type === 'phase_done') {
+    addPhase(event.phase, 'completed');
+  } else if (type === 'agent_start') {
+    agentCount++;
+    const agentId = `agent_${agentCount}`;
+    const name = event.agent || 'subagent';
+    const agentType = event.agent_type || 'other';
+    agents.set(agentId, { name, type: agentType, status: 'running', started: Date.now() });
+    addAgentNode(agentId, name, agentType);
+    updateAgentList();
+    document.getElementById('statAgents').textContent = agentCount;
+    document.getElementById('agentCountBadge').textContent = `${agentCount} agents`;
+  } else if (type === 'task_started') {
+    // Map task_id to latest agent
+    const taskId = event.task_id;
+    if (agents.size > 0) {
+      const lastAgent = Array.from(agents.entries()).pop();
+      if (lastAgent) agents.get(lastAgent[0]).taskId = taskId;
+    }
+  } else if (type === 'task_done') {
+    const taskId = event.task_id;
+    // Find agent by taskId and update status
+    for (const [id, a] of agents) {
+      if (a.taskId === taskId || (!a.taskId && a.status === 'running')) {
+        a.status = event.status || 'completed';
+        a.taskId = taskId;
+        updateAgentNode(id, a.status);
+        break;
+      }
+    }
+    // Update findings counts
+    const fu = event.findings_update;
+    if (fu) {
+      document.getElementById('statCritical').textContent = fu.critical || 0;
+      document.getElementById('statHigh').textContent = fu.high || 0;
+      document.getElementById('statMedium').textContent = fu.medium || 0;
+      document.getElementById('statLow').textContent = fu.low || 0;
+      document.getElementById('findingCountBadge').textContent = `${fu.total || 0} findings`;
+    }
+    updateAgentList();
+  } else if (type === 'new_finding') {
+    // Live finding notification — flash it in the log with severity color
+    const sev = event.severity || 'info';
+    const sevColors = {critical:'var(--red)', high:'var(--orange)', medium:'var(--yellow)', low:'var(--green)', info:'var(--accent)'};
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.style.color = sevColors[sev] || 'var(--text)';
+    entry.style.fontWeight = '700';
+    const time = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    entry.innerHTML = `<span class="time">${time}</span><span class="sev sev-${sev}" style="font-size:8px;margin-right:4px">${sev.toUpperCase()}</span>${escHtml(event.title || '')} ${event.cvss ? '(CVSS: '+event.cvss+')' : ''}`;
+    document.getElementById('logStream').appendChild(entry);
+    document.getElementById('logStream').scrollTop = document.getElementById('logStream').scrollHeight;
+  } else if (type === 'user_question') {
+    // Agent needs user input — show modal popup with 30s timeout
+    showQuestion(event.question || event.message || 'Agent needs additional information');
+  } else if (type === 'user_answer') {
+    // User answer was recorded — no special handling needed, just logged
+  } else if (type === 'pipeline_done' || type === 'pipeline_stopped' || type === 'pipeline_timeout') {
+    setStatus(event.status || 'completed');
+    resetButtons();
+    if (event.total_findings) {
+      document.getElementById('statCritical').textContent = event.critical || 0;
+      document.getElementById('statHigh').textContent = event.high || 0;
+      document.getElementById('statMedium').textContent = event.medium || 0;
+      document.getElementById('statLow').textContent = event.low || 0;
+      document.getElementById('findingCountBadge').textContent = `${event.total_findings} findings`;
+    }
+    if (event.report_path) {
+      document.getElementById('downloadSection').style.display = 'block';
+      document.getElementById('downloadReport').href = `/api/download/${currentJobId}/report`;
+    }
+    fetchFindings();
+    // Auto-switch to findings tab
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tabFindings').classList.add('active');
+    document.querySelectorAll('.tab')[2].classList.add('active');
+  } else if (type === 'pipeline_error') {
+    setStatus('failed');
+    resetButtons();
+  }
+}
+
+let findingsPollingInterval = null;
+let currentFilter = 'all';
+let lastFindingsCount = 0;
+
+function startFindingsPolling() {
+  if (findingsPollingInterval) clearInterval(findingsPollingInterval);
+  findingsPollingInterval = setInterval(fetchFindings, 3000);
+}
+
+function stopFindingsPolling() {
+  if (findingsPollingInterval) { clearInterval(findingsPollingInterval); findingsPollingInterval = null; }
+}
+
+async function fetchFindings() {
+  if (!currentJobId) return;
+  try {
+    const resp = await fetch(`/api/findings/${currentJobId}`);
+    const data = await resp.json();
+    if (data.length !== lastFindingsCount) {
+      lastFindingsCount = data.length;
+      renderFindings(data);
+      // Update filter counts
+      const counts = {critical:0, high:0, medium:0, low:0, info:0};
+      data.forEach(f => { if (counts[f.severity] !== undefined) counts[f.severity]++; });
+      document.getElementById('filterCritCount').textContent = counts.critical;
+      document.getElementById('filterHighCount').textContent = counts.high;
+      document.getElementById('filterMedCount').textContent = counts.medium;
+      document.getElementById('filterLowCount').textContent = counts.low;
+      document.getElementById('filterInfoCount').textContent = counts.info;
+      // Update stats
+      document.getElementById('statCritical').textContent = counts.critical;
+      document.getElementById('statHigh').textContent = counts.high;
+      document.getElementById('statMedium').textContent = counts.medium;
+      document.getElementById('statLow').textContent = counts.low;
+      document.getElementById('findingCountBadge').textContent = `${data.length} findings`;
+    }
+  } catch(e) {}
+}
+
+function filterFindings(sev) {
+  currentFilter = sev;
+  document.querySelectorAll('.finding-card').forEach(card => {
+    if (sev === 'all' || card.dataset.severity === sev) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function toggleFinding(id) {
+  const card = document.getElementById(`finding-${id}`);
+  if (card) card.classList.toggle('expanded');
+}
+
+function renderFindings(findingsData) {
+  const container = document.getElementById('findingsList');
+  if (!findingsData || !findingsData.length) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px;font-size:12px">No findings yet — agents are scanning...</div>';
+    return;
+  }
+  const sevOrder = {critical:0, high:1, medium:2, low:3, info:4};
+  findingsData.sort((a,b) => (sevOrder[a.severity]||5) - (sevOrder[b.severity]||5));
+
+  container.innerHTML = findingsData.map((f, i) => {
+    const sev = f.severity || 'info';
+    const cvss = f.cvss_score ? `<span class="finding-cvss">${f.cvss_score}</span>` : '';
+    const isNew = (Date.now()/1000 - (f.timestamp||0)) < 10;
+
+    // Build detail sections
+    let details = '';
+
+    // Description
+    if (f.description) {
+      details += `<div class="finding-section"><div class="finding-section-title">Description</div><div>${escHtml(f.description)}</div></div>`;
+    }
+
+    // Endpoint & Method
+    if (f.endpoint || f.method || f.parameter) {
+      details += `<div class="finding-section"><div class="finding-section-title">Target</div><div class="finding-code">`;
+      if (f.method) details += `Method: ${escHtml(f.method)}\n`;
+      if (f.endpoint) details += `URL: ${escHtml(f.endpoint)}\n`;
+      if (f.parameter) details += `Parameter: ${escHtml(f.parameter)}`;
+      details += `</div></div>`;
+    }
+
+    // Payload / Request
+    if (f.payload) {
+      details += `<div class="finding-section"><div class="finding-section-title">Payload / Request</div><div class="finding-code">${escHtml(f.payload)}</div></div>`;
+    }
+    if (f.request) {
+      details += `<div class="finding-section"><div class="finding-section-title">HTTP Request</div><div class="finding-code">${escHtml(f.request)}</div></div>`;
+    }
+
+    // Evidence / Response
+    if (f.evidence) {
+      details += `<div class="finding-section"><div class="finding-section-title">Evidence</div><div class="finding-code">${escHtml(f.evidence)}</div></div>`;
+    }
+    if (f.response) {
+      details += `<div class="finding-section"><div class="finding-section-title">Response</div><div class="finding-code">${escHtml(typeof f.response === 'string' ? f.response : JSON.stringify(f.response, null, 2))}</div></div>`;
+    }
+
+    // Reproduction Steps
+    if (f.reproduction_steps || f.steps) {
+      const steps = f.reproduction_steps || f.steps;
+      const stepsHtml = Array.isArray(steps)
+        ? '<ol style="margin:0;padding-left:18px">' + steps.map(s => `<li>${escHtml(s)}</li>`).join('') + '</ol>'
+        : `<div class="finding-code">${escHtml(steps)}</div>`;
+      details += `<div class="finding-section"><div class="finding-section-title">How to Reproduce</div>${stepsHtml}</div>`;
+    }
+
+    // Impact
+    if (f.impact) {
+      details += `<div class="finding-section"><div class="finding-section-title">Impact</div><div>${escHtml(f.impact)}</div></div>`;
+    }
+
+    // Remediation
+    if (f.remediation) {
+      details += `<div class="finding-section"><div class="finding-section-title">Remediation</div><div class="finding-remediation">${escHtml(f.remediation)}</div></div>`;
+    }
+    if (f.fix) {
+      details += `<div class="finding-section"><div class="finding-section-title">Suggested Fix</div><div class="finding-code">${escHtml(f.fix)}</div></div>`;
+    }
+
+    // Tags (CWE, OWASP, CVSS vector)
+    let tags = '';
+    if (f.cwe || f.owasp || f.cvss_vector || f.type) {
+      tags = '<div class="finding-badge-row">';
+      if (f.cwe) tags += `<span class="finding-tag">${escHtml(f.cwe)}</span>`;
+      if (f.owasp) tags += `<span class="finding-tag">${escHtml(f.owasp)}</span>`;
+      if (f.type) tags += `<span class="finding-tag">${escHtml(f.type)}</span>`;
+      if (f.cvss_vector) tags += `<span class="finding-tag">${escHtml(f.cvss_vector)}</span>`;
+      if (f.source_agent) tags += `<span class="finding-tag">Agent: ${escHtml(f.source_agent)}</span>`;
+      tags += '</div>';
+    }
+
+    const display = (currentFilter === 'all' || currentFilter === sev) ? '' : 'display:none';
+
+    return `<div class="finding-card ${sev} ${isNew ? 'finding-new' : ''}" id="finding-${i}" data-severity="${sev}" style="${display}">
+      <div class="finding-header" onclick="toggleFinding(${i})">
+        <span class="finding-chevron">▶</span>
+        <span class="sev sev-${sev}">${sev.toUpperCase()}</span>
+        <span class="finding-title-text">${escHtml(f.title || f.type || 'Unknown Vulnerability')}</span>
+        ${cvss}
+      </div>
+      <div class="finding-body">
+        ${tags}
+        ${details || '<div style="color:var(--text-dim)">No additional details available</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateAgentList() {
+  const container = document.getElementById('agentList');
+  const entries = Array.from(agents.entries()).reverse().slice(0, 50);
+  container.innerHTML = entries.map(([id, a]) => {
+    const statusColor = a.status === 'running' ? 'var(--green)' : 'var(--text-dim)';
+    const dot = a.status === 'running' ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:4px;animation:pulse 1.5s infinite"></span>' : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--text-dim);margin-right:4px;opacity:0.4"></span>';
+    return `<div style="padding:3px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:4px">${dot}<span class="agent-tag tag-${a.type}" style="font-size:8px;padding:1px 4px;border-radius:3px">${a.type}</span><span style="color:${statusColor};font-size:10px">${escHtml(a.name)}</span></div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════════
+function addPhase(phase, status) {
+  const name = phase.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  if (!phases.has(phase)) {
+    phases.add(phase);
+    const li = document.createElement('li');
+    li.className = `phase-item ${status}`;
+    li.id = `phase-${phase}`;
+    li.innerHTML = `<span class="phase-icon">${status === 'completed' ? '✓' : '▶'}</span><span class="phase-name">${name}</span>`;
+    document.getElementById('phaseList').appendChild(li);
+  } else {
+    const li = document.getElementById(`phase-${phase}`);
+    if (li) {
+      li.className = `phase-item ${status}`;
+      li.querySelector('.phase-icon').textContent = status === 'completed' ? '✓' : '▶';
+    }
+  }
+}
+
+function addLog(event) {
+  const stream = document.getElementById('logStream');
+  const entry = document.createElement('div');
+  const type = event.type;
+  let cls = 'log-entry';
+  if (type.includes('phase')) cls += ' phase';
+  if (type.includes('error')) cls += ' error';
+  entry.className = cls;
+
+  const time = new Date().toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const msg = escHtml(event.message || event.error || type);
+  const agentType = event.agent_type || '';
+  const agent = event.agent ? `<span class="agent-tag tag-${agentType}">${escHtml(event.agent).slice(0,30)}</span>` : '';
+  entry.innerHTML = `<span class="time">${time}</span>${agent}${msg}`;
+  stream.appendChild(entry);
+  if (stream.children.length > 500) stream.removeChild(stream.firstChild);
+  stream.scrollTop = stream.scrollHeight;
+  logCount++;
+}
+
+function setStatus(status) {
+  const badge = document.getElementById('statusBadge');
+  badge.className = 'status-badge ' + status;
+  const labels = { idle: 'Idle', running: 'Scanning...', completed: 'Complete', failed: 'Failed', stopped: 'Stopped', timeout: 'Timeout' };
+  badge.textContent = labels[status] || status;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s).substring(0, 500);
+  return d.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════
+// USER QUESTION MODAL
+// ═══════════════════════════════════════════════════════════
+let pendingQuestion = null;
+let questionTimer = null;
+let questionCountdown = 30;
+
+function showQuestion(questionText) {
+  pendingQuestion = questionText;
+  document.getElementById('modalQuestion').textContent = questionText;
+  document.getElementById('modalAnswer').value = '';
+  document.getElementById('questionModal').classList.add('active');
+  document.getElementById('modalAnswer').focus();
+
+  // Start 30s countdown
+  questionCountdown = 30;
+  document.getElementById('modalTimer').textContent = '30s';
+  if (questionTimer) clearInterval(questionTimer);
+  questionTimer = setInterval(() => {
+    questionCountdown--;
+    document.getElementById('modalTimer').textContent = questionCountdown + 's';
+    if (questionCountdown <= 5) {
+      document.getElementById('modalTimer').style.color = 'var(--red)';
+    }
+    if (questionCountdown <= 0) {
+      dismissQuestion();
+    }
+  }, 1000);
+}
+
+function dismissQuestion() {
+  if (questionTimer) { clearInterval(questionTimer); questionTimer = null; }
+  document.getElementById('questionModal').classList.remove('active');
+  document.getElementById('modalTimer').style.color = 'var(--yellow)';
+  pendingQuestion = null;
+}
+
+async function submitAnswer() {
+  const answer = document.getElementById('modalAnswer').value.trim();
+  if (!answer || !currentJobId) { dismissQuestion(); return; }
+
+  try {
+    await fetch(`/api/user-input/${currentJobId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ question: pendingQuestion || '', answer }),
+    });
+  } catch(e) {
+    console.error('Failed to submit answer:', e);
+  }
+  dismissQuestion();
+}
+
+// Allow Enter to submit (Shift+Enter for newline)
+document.getElementById('modalAnswer').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    submitAnswer();
+  }
+});
+
+// Init
+initGraph();
+</script>
+</body>
+</html>
